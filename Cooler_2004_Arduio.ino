@@ -9,9 +9,9 @@ DS3231 myRTC;
 DateTime myDT;
 LiquidCrystal_I2C lcd(0x27, 20, 04);
 //Constants
-#define DHTPIN 5
+#define DHTPIN 2
 #define DHTTYPE DHT22  // DHT 22  (AM2302)
-#define numPins 7
+#define numPins 5
 #define on HIGH
 #define off LOW
 DHT dht(DHTPIN, DHTTYPE);  //// Initialize DHT sensor for normal 16mhz Arduino
@@ -32,9 +32,18 @@ bool heat_status = false;
 bool circulation_status = false;
 bool cooler_set = true;
 bool hum_set = true;
-byte Pin[7] = { 2, 8, 6, 10, 7, 9, 3}; //cooler, fan_fridge, lamp_fridge, fan_heat, humi, fan_up, fan_up_ctrl
+bool fanSpeed = false;
+bool kompressor = true;
+bool fanOnOff = EEPROM.read(8);
+bool compressorWait = true ;
+const byte Pin[5] = { 3, 4, 5, 6, 7 };  //cooler, Heating, Humyfider, Circulation, fan_up_ctrl
 byte downArrow[] = { 0x00, 0x04, 0x04, 0x04, 0x04, 0x1F, 0x0E, 0x04 };
 byte upArrow[] = { 0x04, 0x0E, 0x1F, 0x04, 0x04, 0x04, 0x04, 0x00 };
+byte heatSymbol [] = { 0x04, 0x02, 0x04, 0x08, 0x10, 0x08, 0x04, 0x1F };
+byte coolerSymbol [] = { 0x04, 0x15, 0x0E, 0x04, 0x0E, 0x15, 0x04, 0x00 };
+byte dehumySymbol [] = { 0x00, 0x00, 0x04, 0x0E, 0x17, 0x17, 0x17, 0x0E };
+byte humySymbol [] = { 0x00, 0x00, 0x04, 0x0E, 0x1F, 0x1F, 0x1F, 0x0E };
+byte circSymbol [] = { 0x10, 0x11, 0x0A, 0x04, 0x10, 0x11, 0x0A, 0x04 };
 void setup() {
   Wire.begin();
   Serial.begin(9600);
@@ -42,16 +51,21 @@ void setup() {
     In order to synchronise your clock module, insert timetable values below !
     ----------------------------------------------------------------------------*/
   // myRTC.setClockMode(false);
-  // myRTC.setHour(21);
-  // myRTC.setMinute(8);
+  // myRTC.setHour(15);
+  // myRTC.setMinute(9);
   // myRTC.setSecond(30);
 
-  // myRTC.setDate(22);
-  // myRTC.setMonth(1);
+  // myRTC.setDate(19);
+  // myRTC.setMonth(4);
   // myRTC.setYear(23);
   lcd.begin();
   lcd.createChar(0, downArrow);
   lcd.createChar(1, upArrow);
+  lcd.createChar(2, heatSymbol);
+  lcd.createChar(3, coolerSymbol);
+  lcd.createChar(4, dehumySymbol);
+  lcd.createChar(5, humySymbol);
+  lcd.createChar(6, circSymbol);
   // Turn on the blacklight and print a message.
   lcd.backlight();
   lcd.setCursor(3, 0);
@@ -68,23 +82,20 @@ void setup() {
   dht.begin();
   delay(3000);
   lcd.clear();
-  compressorTs = (myDT.unixtime() + 90);
+  compressorTs = (myDT.unixtime() + 120);
 }
 void loop() {
   myDT = RTClib::now();
-  uint32_t ReadDht;
-  if (myDT.unixtime() >= ReadDht){
-    hum = dht.readHumidity();
-    temp = dht.readTemperature();
-    ReadDht = myDT.unixtime() + 2;
-  }
-  readSerial();  
+  hum = dht.readHumidity();
+  temp = dht.readTemperature();
+  delay(2000);
+  digitalWrite(Pin[3], fanOnOff);
+  readSerial();
   tempCtrl();
   humCtrl();
   fanUpCtrl();
   serialPrint();
   lcdPrint();
-  delay(700);
 }
 void tempCtrl() {
   if (cooler_set) {
@@ -98,11 +109,11 @@ void tempCtrl() {
       hum_set = true;
     }
   }
-  if (temp <= (temperature - 0.6)) {
-    digitalWrite(Pin[3], on);
+  if (temp <= (temperature - 0.9)) {
+    digitalWrite(Pin[1], on);
     heat_status = true;
   } else if (temp >= temperature) {
-    digitalWrite(Pin[3], off);
+    digitalWrite(Pin[1], off);
     heat_status = false;
   }
 }
@@ -112,107 +123,120 @@ void humCtrl() {
       compressor(on);
       cooler_set = false;
       dehumi_status = true;
+      fanSpeed = true;
+      if (temp < (temperature - 0.3)) {
+        digitalWrite(Pin[1], on);
+      } else {
+        digitalWrite(Pin[1], off);
+      }
     } else if (hum <= humyditi) {
       compressor(off);
       cooler_set = true;
       dehumi_status = false;
+      fanSpeed = false;
     }
   }
-  if (hum <= (humyditi - 4.9) && state) {
-    digitalWrite(Pin[4], on);
+  if (hum <= (humyditi - 2.9) && state) {
+    digitalWrite(Pin[2], on);
     humi_status = true;
-  } else {
-    digitalWrite(Pin[4], off);
+  } else if (hum >= humyditi) {
+    digitalWrite(Pin[2], off);
     humi_status = false;
   }
 }
 void fanUpCtrl() {
-  bool chk;
-  switch (myDT.minute()) {
-    case 0:
-      chk = true;
-      break;
-    case 5:
-      chk = true;
-      break;
-    case 10:
-      chk = true;
-      break;
-    case 15:
-      chk = true;
-      break;
-    case 20:
-      chk = true;
-    case 25:
-      chk = true;
-      break;
-    case 30:
-      chk = true;
-      break;
-    case 35:
-      chk = true;
-      break;
-    case 40:
-      chk = true;
-      break;
-    case 45:
-      chk = true;
-      break;
-    case 50:
-      chk = true;
-      break;
-    case 55:
-      chk = true;
-      break;
-    default:
-      chk = false;
-  }
-  if (chk && state) {
-    analogWrite(Pin[6], fan_up_speed);
-    digitalWrite(Pin[5], on);
+
+  if (fanSpeed && state) {
+    analogWrite(Pin[4], 255);
     circulation_status = true;
   } else {
-    analogWrite(Pin[6], 0);
-    digitalWrite(Pin[5], off);
+    analogWrite(Pin[4], fan_up_speed);
     circulation_status = false;
   }
 }
 void serialPrint() {
   if (serialStatus) {
-    Serial.print("cooler:");
-    Serial.print(cooler_status);
-    Serial.print(" dehum:");
-    Serial.print(dehumi_status);
-    Serial.print(" heat:");
-    Serial.print(heat_status);
-    Serial.print(" humy:");
-    Serial.print(humi_status);
-    Serial.print(" circ:");
-    Serial.print(circulation_status);
-    Serial.print(" state:");
-    Serial.print(state);
-    Serial.print(" humStat:");
-    Serial.print(hum_set);
-    Serial.print(" CoolerStat:");
-    Serial.print(cooler_set);
-    Serial.print(" Fan Speed:");
-    Serial.print(fan_up_speed);
+    Serial.print("Cooler:");
+    if (cooler_status == true) {
+
+      Serial.print("ON");
+      if (compressorWait == false){
+        Serial.print("!,");
+      }
+      else{
+        Serial.print(",");
+      }
+    } else {
+      Serial.print("OFF,");
+    }
+    Serial.print(" Dehum:");
+    if (dehumi_status == true) {
+      Serial.print("ON,");
+    } else {
+      Serial.print("OFF,");
+    }
+    Serial.print(" Heat:");
+    if (heat_status == true) {
+      Serial.print("ON,");
+    } else {
+      Serial.print("OFF,");
+    }
+    Serial.print(" Humy:");
+    if (humi_status == true) {
+      Serial.print("ON,");
+    } else {
+      Serial.print("OFF,");
+    }
+    Serial.print(" FanHS:");
+    if (circulation_status == true) {
+      Serial.print("ON,");
+    } else {
+      Serial.print("OFF,");
+    }
+    Serial.print(" Mode:");
+    if (state == true) {
+      Serial.print("Dehydrating,");
+    } else {
+      Serial.print("Cooler/Freeze,");
+    }
+    Serial.print(" Humy:");
+    if (hum_set == true) {
+      Serial.print("Enabled,");
+    } else {
+      Serial.print("Disabled,");
+    }
+    Serial.print(" Cooler:");
+    if (cooler_set == true) {
+      Serial.print("Enabled,");
+    } else {
+      Serial.print("Disabled,");
+    }
+    Serial.print(" Fan/Speed:");
+    if (fanOnOff == true) {
+      Serial.print("ON/");
+      Serial.print(fan_up_speed);
+      Serial.print(",");
+    } else {
+      Serial.print("OFF,");
+    }
     Serial.print(" T:");
     Serial.print(temperature);
+    Serial.print(",");
     Serial.print(" H:");
     Serial.print(humyditi);
-    Serial.print(" TS:");
-    Serial.println(timeStamp);
-    Serial.print("Hum: ");
+    Serial.print(",");
+    Serial.print(" Day/s:");
+    Serial.println(timeReturn());
+    Serial.print("Hum:");
     Serial.print(hum);
-    Serial.print("    Temp: ");
+    Serial.print("  Temp:");
     Serial.println(temp);
   } else {
-    Serial.println("Enter 5");
+    Serial.println("Serial Disabled, Enter 5 to Enabling");
   }
 }
 void lcdPrint() {
-  lcd.cursor_off();  
+  lcd.cursor_off();
   //lcd.clear();
   lcd.setCursor(0, 0);
   printDigitsLcd(myDT.day());
@@ -229,11 +253,17 @@ void lcdPrint() {
   lcd.print(temp);
   if (cooler_status) {
     lcd.write(byte(0));
-    lcd.print("  ");    
+    if (compressorWait == false){
+      lcd.print("!");
+    }
+    else {
+      lcd.print(" ");
+    }
+    lcd.print("  ");
   } else if (heat_status) {
     lcd.write(byte(1));
   } else {
-    lcd.print("  ");
+    lcd.print("   ");
   }
   lcd.setCursor(12, 1);
   lcd.print("H:");
@@ -243,7 +273,7 @@ void lcdPrint() {
   } else if (humi_status) {
     lcd.write(byte(1));
   } else {
-    lcd.print("  ");
+    lcd.print("   ");
   }
   lcd.setCursor(0, 2);
   lcd.print("Mode:");
@@ -256,6 +286,28 @@ void lcdPrint() {
   lcd.print("Day:");
   printDigitsLcd(timeReturn());
   lcd.setCursor(0, 3);
+  lcd.print("                    ");
+  if (cooler_status & compressorWait){
+    lcd.setCursor(1, 3);
+    lcd.write(byte(3));
+  }
+  if (dehumi_status){
+    lcd.setCursor(3, 3);
+    lcd.write(byte(4));
+  }
+  if (heat_status){
+    lcd.setCursor(5, 3);
+    lcd.write(byte(2));
+  }
+  if (humi_status){
+    lcd.setCursor(7, 3);
+    lcd.write(byte(5));    
+  }
+  if (fanOnOff){
+    lcd.setCursor(9, 3);
+    lcd.write(byte(6)); 
+  }
+
   // printDigitsLcd(cooler_status);
   // printDigitsLcd(dehumi_status);
   // printDigitsLcd(heat_status);
@@ -272,28 +324,29 @@ byte timeReturn() {
   byte dayResult = ((myDT.unixtime() - timeStamp) / 86400);
   return dayResult;
 }
-void compressor(byte i){
-  bool k;
-  if (myDT.unixtime() >= compressorTs){
-    if (i == HIGH){
-          digitalWrite(Pin[0], on);
-          digitalWrite(Pin[1], on);
-          k = true;
-    }
-    else if (i == LOW){
+void compressor(byte i) {
+  if (myDT.unixtime() >= compressorTs) {
+    if (i == HIGH) {
+      digitalWrite(Pin[0], on);
+      kompressor = true;
+    } else if (i == LOW) {
       digitalWrite(Pin[0], off);
-      digitalWrite(Pin[1], off);
-      if ( k == true ){
-      compressorTs = (myDT.unixtime() +90);
-      k= false;
+      if (kompressor == true) {
+        compressorTs = (myDT.unixtime() + 120);
+        delay(100);
+        kompressor = false;
       }
     }
-  } 
+    compressorWait = true;
+  } else {
+    compressorWait = false;
+  }
 }
 void readSerial() {
-  String error = "Wrong Input\n";
-  String done = "DONE\n";
-  String enaDis[2] = {"Enable\n", "Disable\n"};
+  String error = " Wrong Input\n";
+  String done = " DONE\n";
+  int pause = 3000;
+  String enaDis[2] = { "Enable\n", "Disable\n" };
   if (Serial.available() > 0) {
     byte a = Serial.parseInt();
     if (a == 1) {
@@ -303,6 +356,7 @@ void readSerial() {
       temperature = EEPROM.read(0);
       Serial.println(temperature);
       Serial.println(done);
+      delay(pause);
     } else if (a == 2) {
       Serial.print("Hum: ");
       while (!Serial.available()) {}
@@ -310,23 +364,30 @@ void readSerial() {
       humyditi = EEPROM.read(1);
       Serial.println(humyditi);
       Serial.println(done);
+      delay(pause);
     } else if (a == 3) {
       Serial.print("Mode: ");
       while (!Serial.available()) {}
       EEPROM.update(2, Serial.parseInt());
       state = EEPROM.read(2);
-      Serial.println(state);
+      if (state == 1) {
+        Serial.println(" Dehydration ");
+      } else {
+        Serial.println(" Cooler/Freeze ");
+      }
       Serial.println(done);
+      delay(pause);
     } else if (a == 4) {
       Serial.print("Reset Day?: ");
       while (!Serial.available()) {}
       if (Serial.parseInt()) {
         EEPROM.put(3, myDT.unixtime());
         EEPROM.get(3, timeStamp);
-        Serial.println(done);
+        Serial.print(" Day Counter Reset");
       } else {
-        Serial.println(error);
+        Serial.print("Day Counter Not Reset");
       }
+      delay(pause);
     } else if (a == 5) {
       Serial.print("Serial: ");
       while (!Serial.available()) {}
@@ -340,14 +401,31 @@ void readSerial() {
         Serial.println(error);
       }
     } else if (a == 6) {
-      Serial.print("Fan Speed: ");
+      Serial.print("Fan Speed (1-255): ");
       while (!Serial.available()) {}
       EEPROM.update(8, Serial.parseInt());
       fan_up_speed = EEPROM.read(8);
       Serial.print(fan_up_speed);
       Serial.println(done);
-    } else {
+      delay(pause);
+
+    } else if (a == 7) {
+      Serial.print("High Speed: ");
+      while (!Serial.available()) {}
+      EEPROM.update(9, Serial.parseInt());
+      fanOnOff = EEPROM.read(9);
+      if (fanOnOff == true) {
+        Serial.print(" ON");
+      } else {
+        Serial.print(" OFF");
+      }
+      Serial.println(done);
+      delay(pause);
+    }
+
+    else {
       Serial.println(error);
+      delay(pause);
     }
   }
 }

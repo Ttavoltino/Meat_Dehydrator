@@ -16,15 +16,16 @@ LiquidCrystal_I2C lcd(0x27, 20, 04);
 #define off LOW
 DHT dht(DHTPIN, DHTTYPE);  //// Initialize DHT sensor for normal 16mhz Arduino
 //Variables
-byte temperature = EEPROM.read(0);  // Set up  Temperature
-byte humyditi = EEPROM.read(1);     // Set up humidity
-bool state = EEPROM.read(2);        // True work like dehidratation False work for cooling
+int temperature = EEPROM.read(0);  // Set up  Temperature
+byte humyditi = EEPROM.read(4);     // Set up humidity
+bool state = EEPROM.read(5);        // True work like dehidratation False work for cooling
 float hum;                          //Stores humidity value
 float temp;                         //Stores temperature value
-uint32_t timeStamp = EEPROM.get(3, timeStamp);
+uint32_t timeStamp = EEPROM.get(6, timeStamp);
 uint32_t compressorTs;
-bool serialStatus = EEPROM.read(7);
-byte fan_up_speed = EEPROM.read(8);
+bool serialStatus = EEPROM.read(10);
+byte fan_up_speed = EEPROM.read(11);
+byte serialCheck = 0;
 bool cooler_status = false;
 bool dehumi_status = false;
 bool humi_status = false;
@@ -34,7 +35,7 @@ bool cooler_set = true;
 bool hum_set = true;
 bool fanSpeed = false;
 bool kompressor = true;
-bool fanOnOff = EEPROM.read(8);
+bool fanOnOff = EEPROM.read(12);
 bool compressorWait = true ;
 const byte Pin[5] = { 3, 4, 5, 6, 7 };  //cooler, Heating, Humyfider, Circulation, fan_up_ctrl
 byte downArrow[] = { 0x00, 0x04, 0x04, 0x04, 0x04, 0x1F, 0x0E, 0x04 };
@@ -46,7 +47,7 @@ byte humySymbol [] = { 0x00, 0x00, 0x04, 0x0E, 0x1F, 0x1F, 0x1F, 0x0E };
 byte circSymbol [] = { 0x10, 0x11, 0x0A, 0x04, 0x10, 0x11, 0x0A, 0x04 };
 void setup() {
   Wire.begin();
-  Serial.begin(9600);
+  Serial.begin(115200);
   /*----------------------------------------------------------------------------
     In order to synchronise your clock module, insert timetable values below !
     ----------------------------------------------------------------------------*/
@@ -83,13 +84,13 @@ void setup() {
   delay(3000);
   lcd.clear();
   compressorTs = (myDT.unixtime() + 120);
+  
 }
 void loop() {
   myDT = RTClib::now();
   hum = dht.readHumidity();
   temp = dht.readTemperature();
   delay(2000);
-  digitalWrite(Pin[3], fanOnOff);
   readSerial();
   tempCtrl();
   humCtrl();
@@ -103,16 +104,16 @@ void tempCtrl() {
       hum_set = false;
       compressor(on);
       cooler_status = true;
-    } else if (temp <= temperature) {
+    } else if (temp <= (temperature + 0.5)) {
       compressor(off);
       cooler_status = false;
       hum_set = true;
     }
   }
-  if (temp <= (temperature - 0.9)) {
+  if (temp <= (temperature - 1)) {
     digitalWrite(Pin[1], on);
     heat_status = true;
-  } else if (temp >= temperature) {
+  } else if (temp >= temperature -0.5) {
     digitalWrite(Pin[1], off);
     heat_status = false;
   }
@@ -124,35 +125,79 @@ void humCtrl() {
       cooler_set = false;
       dehumi_status = true;
       fanSpeed = true;
-      if (temp < (temperature - 0.3)) {
+      if (temp <= temperature ) {
         digitalWrite(Pin[1], on);
-      } else {
+      } else if (temp >= (temperature + 0.9)) {
         digitalWrite(Pin[1], off);
       }
-    } else if (hum <= humyditi) {
+    } else if (hum <= (humyditi + 4.4)) {
       compressor(off);
       cooler_set = true;
       dehumi_status = false;
       fanSpeed = false;
     }
   }
-  if (hum <= (humyditi - 2.9) && state) {
+  if (hum <= (humyditi - 1) && state) {
     digitalWrite(Pin[2], on);
     humi_status = true;
-  } else if (hum >= humyditi) {
+  } else if (hum >= (humyditi - 0.5)) {
+    
     digitalWrite(Pin[2], off);
     humi_status = false;
   }
 }
 void fanUpCtrl() {
-
-  if (fanSpeed && state) {
-    analogWrite(Pin[4], 255);
-    circulation_status = true;
-  } else {
-    analogWrite(Pin[4], fan_up_speed);
-    circulation_status = false;
+  
+  bool chk;
+  analogWrite(Pin[4], fan_up_speed);
+  digitalWrite(Pin[3], fanOnOff); // WARNING
+ 
+   switch (myDT.hour()) {
+    case 0:
+      chk = true;
+      break;
+    case 6:
+      chk = true;
+      break;
+    case 12:
+      chk = true;
+      break;
+    case 18:
+      chk = true;
+      break;
+    // case 20:
+    //   chk = true;
+    // case 25:
+    //   chk = true;
+    //   break;
+    // case 30:
+    //   chk = true;
+    //   break;
+    // case 35:
+    //   chk = true;
+    //   break;
+    // case 40:
+    //   chk = true;
+    //   break;
+    // case 45:
+    //   chk = true;
+    //   break;
+    // case 50:
+    //   chk = true;
+    //   break;
+    // case 55:
+    //   chk = true;
+    //   break;
+    default:
+      chk = false;
   }
+  if (chk && state && (myDT.minute() <=5)) {
+    fanOnOff =EEPROM.read(12);
+  } else {
+    fanOnOff =false;
+  }
+  
+
 }
 void serialPrint() {
   if (serialStatus) {
@@ -212,7 +257,7 @@ void serialPrint() {
       Serial.print("Disabled,");
     }
     Serial.print(" Fan/Speed:");
-    if (fanOnOff == true) {
+    if (fanOnOff) {
       Serial.print("ON/");
       Serial.print(fan_up_speed);
       Serial.print(",");
@@ -232,7 +277,11 @@ void serialPrint() {
     Serial.print("  Temp:");
     Serial.println(temp);
   } else {
-    Serial.println("Serial Disabled, Enter 5 to Enabling");
+    if (serialCheck < 1){
+    Serial.println("Serial Disabled, Enter 0 for MENU");
+    serialCheck = 2;
+    }
+    
   }
 }
 void lcdPrint() {
@@ -343,11 +392,21 @@ void compressor(byte i) {
   }
 }
 void readSerial() {
-  String error = " Wrong Input\n";
-  String done = " DONE\n";
+  String error = "Wrong Input\n";
+  String done = "DONE\n";
   int pause = 3000;
   String enaDis[2] = { "Enable\n", "Disable\n" };
-  if (Serial.available() > 0) {
+
+   if (Serial.available() && Serial.parseInt() == 0) {
+     Serial.flush();
+     Serial.read();
+     //Serial.end();
+    // Serial.begin(1152000);
+     Serial.print("MENU: \n1- Temperature Selection\n2- Humidity Selection\n3- Mode\n4- Reset Count Days\n5- Serial (Enable-Disable)\n6- Fan Speed 1-255\n7- Circulation FAN (ON-OFF) \n\n");
+    while (Serial.available()==0) {};
+   
+    if (Serial.available()) {
+      while (!Serial.available());
     byte a = Serial.parseInt();
     if (a == 1) {
       Serial.print("Temp: ");
@@ -360,16 +419,16 @@ void readSerial() {
     } else if (a == 2) {
       Serial.print("Hum: ");
       while (!Serial.available()) {}
-      EEPROM.update(1, Serial.parseInt());
-      humyditi = EEPROM.read(1);
+      EEPROM.update(4, Serial.parseInt());
+      humyditi = EEPROM.read(4);
       Serial.println(humyditi);
       Serial.println(done);
       delay(pause);
     } else if (a == 3) {
-      Serial.print("Mode: ");
+      Serial.print("Mode(0 - Cooler/Freeze, 1-Dehydration): ");
       while (!Serial.available()) {}
-      EEPROM.update(2, Serial.parseInt());
-      state = EEPROM.read(2);
+      EEPROM.update(5, Serial.parseInt());
+      state = EEPROM.read(5);
       if (state == 1) {
         Serial.println(" Dehydration ");
       } else {
@@ -378,21 +437,21 @@ void readSerial() {
       Serial.println(done);
       delay(pause);
     } else if (a == 4) {
-      Serial.print("Reset Day?: ");
+      Serial.print("Reset Day?(0 - NO, 1-YES): ");
       while (!Serial.available()) {}
       if (Serial.parseInt()) {
-        EEPROM.put(3, myDT.unixtime());
-        EEPROM.get(3, timeStamp);
+        EEPROM.put(6, myDT.unixtime());
+        EEPROM.get(6, timeStamp);
         Serial.print(" Day Counter Reset");
       } else {
         Serial.print("Day Counter Not Reset");
       }
       delay(pause);
     } else if (a == 5) {
-      Serial.print("Serial: ");
+      Serial.print("Serial(0 - OFF, 1-ON): ");
       while (!Serial.available()) {}
-      EEPROM.update(7, Serial.parseInt());
-      serialStatus = EEPROM.read(7);
+      EEPROM.update(10, Serial.parseInt());
+      serialStatus = EEPROM.read(10);
       if (serialStatus == 0)
         Serial.println(enaDis[1]);
       else if (serialStatus == 1) {
@@ -403,18 +462,18 @@ void readSerial() {
     } else if (a == 6) {
       Serial.print("Fan Speed (1-255): ");
       while (!Serial.available()) {}
-      EEPROM.update(8, Serial.parseInt());
-      fan_up_speed = EEPROM.read(8);
+      EEPROM.update(11, Serial.parseInt());
+      fan_up_speed = EEPROM.read(11);
       Serial.print(fan_up_speed);
       Serial.println(done);
       delay(pause);
 
     } else if (a == 7) {
-      Serial.print("High Speed: ");
+      Serial.print("Circulation (0 - OFF, 1-ON): ");
       while (!Serial.available()) {}
-      EEPROM.update(9, Serial.parseInt());
-      fanOnOff = EEPROM.read(9);
-      if (fanOnOff == true) {
+      EEPROM.update(12, Serial.parseInt());
+      fanOnOff = EEPROM.read(12);
+      if (fanOnOff) {
         Serial.print(" ON");
       } else {
         Serial.print(" OFF");
@@ -428,4 +487,5 @@ void readSerial() {
       delay(pause);
     }
   }
+   }
 }
